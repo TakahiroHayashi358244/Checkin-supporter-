@@ -24,7 +24,15 @@
   header{
     background:var(--ink);color:#fff;text-align:center;font-weight:800;
     font-size:26px;letter-spacing:.5px;padding:14px 8px;
+    position:relative;display:flex;align-items:center;justify-content:center;
   }
+  header .htitle{flex:1;}
+  .gear{
+    position:absolute;right:10px;top:50%;transform:translateY(-50%);
+    background:transparent;border:none;color:#fff;font-size:24px;
+    cursor:pointer;line-height:1;padding:6px;
+  }
+  .gear:active{opacity:.6;}
   header .u{text-decoration:underline;text-decoration-color:var(--green);text-decoration-thickness:3px;}
 
   /* ---- メインタブ（機能切替）---- */
@@ -121,11 +129,38 @@
   }
   .reset:active{background:var(--warn);color:#fff;}
   .hint{font-size:12px;color:#888;text-align:center;margin-top:8px;}
+
+  /* ---- 設定モーダル ---- */
+  .modal-overlay{
+    display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
+    z-index:100;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal{
+    background:#fff;width:100%;max-width:380px;border-radius:14px;
+    border:3px solid var(--teal);overflow:hidden;margin-top:30px;
+  }
+  .modal-head{
+    background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:space-between;
+    padding:12px 16px;font-weight:800;font-size:18px;
+  }
+  .modal-close{background:transparent;border:none;color:#fff;font-size:20px;font-weight:800;cursor:pointer;line-height:1;}
+  .set-block{padding:18px 16px;border-bottom:1px solid #e5e5e5;text-align:center;}
+  .set-block:last-child{border-bottom:none;}
+  .set-btn{
+    width:100%;padding:16px;font-size:19px;font-weight:800;
+    background:var(--teal);color:#fff;border:none;border-radius:12px;cursor:pointer;
+  }
+  .set-btn:active{background:#13495a;}
+  .set-label{font-weight:800;font-size:16px;color:var(--teal);margin-bottom:12px;}
+  .qr-wrap{display:inline-block;padding:12px;background:#fff;border:2px solid var(--line);border-radius:12px;}
+  #qrCanvas{display:block;image-rendering:pixelated;width:220px;height:220px;}
+  .app-url{display:block;margin-top:12px;font-size:13px;color:var(--teal);word-break:break-all;text-decoration:none;}
 </style>
 </head>
 <body>
 <div class="app">
-  <header>入庫チェック</header>
+  <header><span class="htitle">入庫チェック</span><button class="gear" id="gearBtn" aria-label="設定">⚙</button></header>
 
   <!-- メインタブ -->
   <div class="maintabs">
@@ -167,6 +202,25 @@
   </div>
 </div>
 
+<!-- 設定モーダル -->
+<div class="modal-overlay" id="setOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <span>設定</span>
+      <button class="modal-close" id="setClose" aria-label="閉じる">✕</button>
+    </div>
+    <div class="set-block">
+      <button class="set-btn" id="updateBtn">最新に更新</button>
+      <div class="hint">キャッシュをクリアして最新版を再読み込みします。</div>
+    </div>
+    <div class="set-block">
+      <div class="set-label">アプリ URL（QRコード）</div>
+      <div class="qr-wrap"><canvas id="qrCanvas"></canvas></div>
+      <a class="app-url" id="appUrl" href="https://takahirohayashi358244.github.io/Checkin-supporter-/" target="_blank" rel="noopener">https://takahirohayashi358244.github.io/Checkin-supporter-/</a>
+    </div>
+  </div>
+</div>
+
 <script>
 const MAX_PALLETS = 16;
 let pallets = [];
@@ -193,6 +247,41 @@ function showPage(name){
 }
 document.getElementById('mt-calc').onclick = ()=>showPage('calc');
 document.getElementById('mt-asin').onclick = ()=>showPage('asin');
+
+/* ---- 設定モーダル ---- */
+const setOverlay = document.getElementById('setOverlay');
+document.getElementById('gearBtn').onclick = ()=>{ setOverlay.classList.add('show'); renderQR(); };
+document.getElementById('setClose').onclick = ()=>{ setOverlay.classList.remove('show'); };
+setOverlay.addEventListener('click', e=>{ if(e.target===setOverlay) setOverlay.classList.remove('show'); });
+
+/* ---- 設定：最新に更新 ---- */
+const APP_URL = 'https://takahirohayashi358244.github.io/Checkin-supporter-/';
+document.getElementById('updateBtn').onclick = async ()=>{
+  try{
+    if('caches' in window){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k=>caches.delete(k)));
+    }
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  }catch(e){}
+  const u = new URL(window.location.href);
+  u.searchParams.set('_', Date.now());
+  window.location.replace(u.toString());
+};
+
+/* ---- 設定：QRコード生成（外部ライブラリ不要）---- */
+let qrDone=false;
+function renderQR(){
+  if(qrDone) return;
+  const canvas = document.getElementById('qrCanvas');
+  try{
+    QRCodeLite.render(canvas, APP_URL);
+    qrDone=true;
+  }catch(e){ /* 失敗時はURLリンクのみ */ }
+}
 
 /* ---- 上段：パレット計算（複数行）---- */
 const CALC_MIN_ROWS = 16;
@@ -340,8 +429,180 @@ function escapeHtml(s){
   return s.replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+/* ---- QRCodeLite: 自己完結型QR生成器（byteモード, ECレベルM）---- */
+const QRCodeLite=(function(){
+  // Galois field tables
+  const EXP=new Array(512), LOG=new Array(256);
+  (function(){let x=1;for(let i=0;i<255;i++){EXP[i]=x;LOG[x]=i;x<<=1;if(x&0x100)x^=0x11d;}for(let i=255;i<512;i++)EXP[i]=EXP[i-255];})();
+  function gmul(a,b){if(a===0||b===0)return 0;return EXP[LOG[a]+LOG[b]];}
+  function genPoly(n){let p=[1];for(let i=0;i<n;i++){const np=new Array(p.length+1).fill(0);for(let j=0;j<p.length;j++){np[j]^=gmul(p[j],1);np[j+1]^=gmul(p[j],EXP[i]);}p=np;}return p;}
+  function ecc(data,n){const res=data.concat(new Array(n).fill(0));const gp=genPoly(n);for(let i=0;i<data.length;i++){const c=res[i];if(c!==0)for(let j=0;j<gp.length;j++)res[i+j]^=gmul(gp[j],c);}return res.slice(data.length);}
+
+  // Version capacity (byte mode, EC level M) for versions 1..10
+  // [version, totalCodewords, ecPerBlock, numBlocks...] simplified: use single-block specs where possible.
+  // We'll support versions up to 10 with EC-M block structure.
+  const VINFO={
+    1:{ec:10,grp:[[1,16]]},
+    2:{ec:16,grp:[[1,28]]},
+    3:{ec:26,grp:[[1,44]]},
+    4:{ec:18,grp:[[2,32]]},
+    5:{ec:24,grp:[[2,43]]},
+    6:{ec:16,grp:[[4,27]]},
+    7:{ec:18,grp:[[4,31]]},
+    8:{ec:22,grp:[[2,38],[2,39]]},
+    9:{ec:22,grp:[[3,36],[2,37]]},
+    10:{ec:26,grp:[[4,43],[1,44]]}
+  };
+  function dataCapacity(v){let n=0;VINFO[v].grp.forEach(g=>n+=g[0]*g[1]);return n;}
+
+  function alignPositions(v){
+    if(v===1)return[];
+    const tbl={2:[6,18],3:[6,22],4:[6,26],5:[6,30],6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]};
+    return tbl[v]||[];
+  }
+
+  function build(text){
+    // UTF-8 bytes
+    const bytes=[];for(const ch of unescape(encodeURIComponent(text)))bytes.push(ch.charCodeAt(0));
+    // choose version
+    let v=1;while(v<=10){const cap=dataCapacity(v); const cci=(v<10)?8:16; const bits=4+cci+bytes.length*8; const need=Math.ceil(bits/8); if(need+0<=cap)break; v++;}
+    if(v>10)throw new Error('too long');
+    const info=VINFO[v]; const totalData=dataCapacity(v);
+    const cci=(v<10)?8:16;
+    // bit stream
+    let bs=[];
+    function push(val,len){for(let i=len-1;i>=0;i--)bs.push((val>>i)&1);}
+    push(4,4); // byte mode
+    push(bytes.length,cci);
+    bytes.forEach(b=>push(b,8));
+    // terminator
+    let rem=totalData*8-bs.length; push(0,Math.min(4,rem));
+    while(bs.length%8!==0)bs.push(0);
+    let dc=[];for(let i=0;i<bs.length;i+=8){let b=0;for(let j=0;j<8;j++)b=(b<<1)|bs[i+j];dc.push(b);}
+    const pads=[0xEC,0x11];let pi=0;while(dc.length<totalData){dc.push(pads[pi++%2]);}
+    // split into blocks
+    let blocks=[];let idx=0;
+    info.grp.forEach(g=>{for(let b=0;b<g[0];b++){const d=dc.slice(idx,idx+g[1]);idx+=g[1];blocks.push({d:d,e:ecc(d,info.ec)});}});
+    // interleave data
+    let maxD=Math.max(...blocks.map(b=>b.d.length));
+    let final=[];
+    for(let i=0;i<maxD;i++)blocks.forEach(b=>{if(i<b.d.length)final.push(b.d[i]);});
+    for(let i=0;i<info.ec;i++)blocks.forEach(b=>final.push(b.e[i]));
+    return {version:v,data:final};
+  }
+
+  function place(version,data){
+    const size=version*4+17;
+    const m=[];for(let i=0;i<size;i++)m.push(new Array(size).fill(null));
+    const res=[];for(let i=0;i<size;i++)res.push(new Array(size).fill(false));
+    function setFinder(r,c){for(let i=-1;i<=7;i++)for(let j=-1;j<=7;j++){const rr=r+i,cc=c+j;if(rr<0||cc<0||rr>=size||cc>=size)continue;const inb=(i>=0&&i<=6&&(j===0||j===6))||(j>=0&&j<=6&&(i===0||i===6))||(i>=2&&i<=4&&j>=2&&j<=4);m[rr][cc]=inb?1:0;}}
+    setFinder(0,0);setFinder(0,size-7);setFinder(size-7,0);
+    // timing
+    for(let i=8;i<size-8;i++){m[6][i]=(i%2===0)?1:0;m[i][6]=(i%2===0)?1:0;}
+    // alignment
+    const ap=alignPositions(version);
+    ap.forEach(r=>ap.forEach(c=>{if(m[r][c]!==null)return;for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){const inb=Math.max(Math.abs(i),Math.abs(j));m[r+i][c+j]=(inb!==1)?1:0;}}));
+    // dark module
+    m[size-8][8]=1;
+    // reserve format areas
+    function reserve(){for(let i=0;i<9;i++){if(m[8][i]===null)m[8][i]=0;if(m[i][8]===null)m[i][8]=0;}for(let i=0;i<8;i++){if(m[8][size-1-i]===null)m[8][size-1-i]=0;if(m[size-1-i][8]===null)m[size-1-i][8]=0;}}
+    reserve();
+    // place data with mask 0
+    let dir=-1,row=size-1,bit=0;
+    function bitAt(idx){return (data[idx>>3]>>(7-(idx&7)))&1;}
+    let col=size-1;
+    while(col>0){
+      if(col===6)col--;
+      for(let i=0;i<size;i++){
+        for(let c=0;c<2;c++){
+          const cc=col-c;
+          if(m[row][cc]===null){
+            let dark=bit<data.length*8?bitAt(bit):0;bit++;
+            // mask 0: (r+c)%2==0
+            if(((row+cc)%2)===0)dark^=1;
+            m[row][cc]=dark;
+          }
+        }
+        row+=dir;
+        if(row<0||row>=size){row-=dir;dir=-dir;break;}
+      }
+      // continue scanning column upward/downward fully
+      col-=2;
+      row=(dir===-1)?0:size-1; // reset handled by loop? simplify below
+    }
+    return m;
+  }
+
+  // The above column scan is simplified; use a robust standard placement instead.
+  function placeRobust(version,data){
+    const size=version*4+17;
+    const m=[];const reserved=[];
+    for(let i=0;i<size;i++){m.push(new Array(size).fill(0));reserved.push(new Array(size).fill(false));}
+    function fdr(r,c){for(let i=-1;i<=7;i++)for(let j=-1;j<=7;j++){const rr=r+i,cc=c+j;if(rr<0||cc<0||rr>=size||cc>=size)continue;const inb=(i>=0&&i<=6&&(j===0||j===6))||(j>=0&&j<=6&&(i===0||i===6))||(i>=2&&i<=4&&j>=2&&j<=4);m[rr][cc]=inb?1:0;reserved[rr][cc]=true;}}
+    fdr(0,0);fdr(0,size-7);fdr(size-7,0);
+    for(let i=0;i<8;i++){reserved[7][i]=true;reserved[i][7]=true;}
+    for(let i=0;i<8;i++){reserved[7][size-1-i]=true;reserved[i][size-8]=true;}
+    for(let i=0;i<8;i++){reserved[size-8][i]=true;reserved[size-1-i][7]=true;}
+    for(let i=0;i<size;i++){if(!reserved[6][i]){m[6][i]=(i%2===0)?1:0;reserved[6][i]=true;}if(!reserved[i][6]){m[i][6]=(i%2===0)?1:0;reserved[i][6]=true;}}
+    const ap=alignPositions(version);
+    ap.forEach(r=>ap.forEach(c=>{if(reserved[r][c])return;let ok=true;for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){if(reserved[r+i]&&reserved[r+i][c+j]){}}for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){const ring=Math.max(Math.abs(i),Math.abs(j));m[r+i][c+j]=(ring!==1)?1:0;reserved[r+i][c+j]=true;}}));
+    m[size-8][8]=1;reserved[size-8][8]=true;
+    // format reserve
+    for(let i=0;i<9;i++){reserved[8][i]=true;reserved[i][8]=true;}
+    for(let i=0;i<8;i++){reserved[8][size-1-i]=true;reserved[size-1-i][8]=true;}
+    // data placement
+    let bit=0;function bitAt(idx){if(idx>=data.length*8)return 0;return (data[idx>>3]>>(7-(idx&7)))&1;}
+    let up=true;
+    for(let col=size-1;col>0;col-=2){
+      if(col===6)col--;
+      for(let n=0;n<size;n++){
+        const row=up?(size-1-n):n;
+        for(let c=0;c<2;c++){
+          const cc=col-c;
+          if(!reserved[row][cc]){
+            let d=bitAt(bit++);
+            if(((row+cc)%2)===0)d^=1; // mask 0
+            m[row][cc]=d;
+          }
+        }
+      }
+      up=!up;
+    }
+    // format info for EC-M mask 0
+    placeFormat(m,size);
+    return m;
+  }
+  function placeFormat(m,size){
+    // EC level M (00) + mask 0 (000) => data 00000
+    // precomputed 15-bit format string for (M,mask0): 101010000010010
+    const fmt=[1,0,1,0,1,0,0,0,0,0,1,0,0,1,0];
+    // around top-left
+    for(let i=0;i<=5;i++)m[8][i]=fmt[i];
+    m[8][7]=fmt[6];m[8][8]=fmt[7];m[7][8]=fmt[8];
+    for(let i=9;i<15;i++)m[14-i][8]=fmt[i];
+    // around top-right / bottom-left
+    for(let i=0;i<=7;i++)m[8][size-1-i]=fmt[i];
+    for(let i=8;i<15;i++)m[size-15+i][8]=fmt[i];
+  }
+
+  function render(canvas,text){
+    const qr=build(text);
+    const m=placeRobust(qr.version,qr.data);
+    const size=m.length;
+    const quiet=4, scale=8;
+    const dim=(size+quiet*2)*scale;
+    canvas.width=dim;canvas.height=dim;
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,dim,dim);
+    ctx.fillStyle='#000';
+    for(let r=0;r<size;r++)for(let c=0;c<size;c++){if(m[r][c])ctx.fillRect((c+quiet)*scale,(r+quiet)*scale,scale,scale);}
+  }
+  return {render};
+})();
+
 init();
 initCalc();
+
 </script>
 </body>
 </html>
